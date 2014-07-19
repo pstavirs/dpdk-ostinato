@@ -22,7 +22,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 #include <QtGlobal>
 #include <pcap.h>
 
+#include "dpdk.h"
+
 #include "bsdport.h"
+#include "dpdkport.h"
 #include "linuxport.h"
 #include "pcapport.h"
 #include "winpcapport.h"
@@ -72,6 +75,9 @@ PortManager::PortManager()
     }
 
     pcap_freealldevs(deviceList);
+
+    // create and append DPDK ports
+    portList_.append(createDpdkPorts(portList_.size()));
 
     foreach(AbstractPort *port, portList_)
         port->init();

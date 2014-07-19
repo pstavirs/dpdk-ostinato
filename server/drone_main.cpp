@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 #include "drone.h"
 
+#include "dpdk.h"
 #include "../common/protocolmanager.h"
 
 #include <google/protobuf/stubs/common.h>
@@ -44,7 +45,11 @@ int main(int argc, char *argv[])
 {
     int exitCode = 0;
     QCoreApplication app(argc, argv);
-    Drone *drone = new Drone();
+    Drone *drone;
+
+    initDpdk(argv[0]);
+
+    drone = new Drone();
     OstProtocolManager = new ProtocolManager();
 
     app.setApplicationName(drone->objectName());
