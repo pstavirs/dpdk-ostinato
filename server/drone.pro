@@ -26,6 +26,7 @@ win32 {
     LIBS += -L"../rpc" -lpbrpc
     POST_TARGETDEPS += "../common/libostproto.a" "../rpc/libpbrpc.a"
 }
+unix: include(dpdk.pri)
 LIBS += -lm
 LIBS += -lprotobuf
 HEADERS += drone.h 
@@ -33,9 +34,11 @@ SOURCES += \
     drone_main.cpp \
     drone.cpp \
     portmanager.cpp \
+    dpdk.cpp \
     abstractport.cpp \
     pcapport.cpp \
     bsdport.cpp \
+    dpdkport.cpp \
     linuxport.cpp \
     winpcapport.cpp 
 SOURCES += myservice.cpp 
