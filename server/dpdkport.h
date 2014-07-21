@@ -22,6 +22,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 #include "abstractport.h"
 
+#include <QList>
+#include <QThread>
+
 class DpdkPort: public AbstractPort
 {
 public:
@@ -29,6 +32,8 @@ public:
     virtual ~DpdkPort();
 
     virtual void init();
+
+    static int setBaseId(int baseId);
 
     virtual bool hasExclusiveControl();
     virtual bool setExclusiveControl(bool exclusive);
@@ -48,6 +53,24 @@ public:
     virtual void stopCapture();
     virtual bool isCaptureOn();
     virtual QIODevice* captureData();
+
+protected:
+    class StatsMonitor: public QThread
+    {
+    public:
+        StatsMonitor();
+        ~StatsMonitor();
+        void run();
+        void stop();
+    private:
+        static const int kRefreshFreq_ = 1; // in seconds
+        int portCount_;
+        bool stop_;
+    };
+
+    static int baseId_;
+    static QList<DpdkPort*> allPorts_;
+    static StatsMonitor *monitor_; // rx/tx stast for ALL ports
 };
 
 #endif
