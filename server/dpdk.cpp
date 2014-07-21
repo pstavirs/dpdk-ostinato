@@ -28,7 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 int initDpdk(char* progname) 
 {
     int ret;
-    static char *eal_args[] = {progname, "-c0xf", "-n1"};
+    static char *eal_args[] = {progname, "-c0xf", "-n1", "-m128", "--file-prefix=drone"};
 
     ret = rte_eal_init(sizeof(eal_args)/sizeof(char*), eal_args);
     if (ret < 0)
@@ -48,18 +48,14 @@ QList<AbstractPort*> createDpdkPorts(int baseId)
     QList<AbstractPort*> portList;
     int i, count = rte_eth_dev_count();
 
+    DpdkPort::setBaseId(baseId);
+
     for (i = 0; i < count ; i++) {
         struct rte_eth_dev_info info;
         char if_name[IF_NAMESIZE];
         AbstractPort *port;
 
         rte_eth_dev_info_get(i, &info);
-        qDebug("dpdk %d: %u "
-                "min_rx_buf = %u, max_rx_pktlen = %u, "
-                "maxq rx/tx = %u/%u", 
-                i, info.if_index,
-                info.min_rx_bufsize, info.max_rx_pktlen,
-                info.max_rx_queues, info.max_tx_queues);
 
         // Use Predictable Interface Naming Convention
         // <http://www.freedesktop.org/wiki/Software/systemd/PredictableNetworkInterfaceNames/>
@@ -73,6 +69,13 @@ QList<AbstractPort*> createDpdkPorts(int baseId)
                     info.pci_dev->addr.bus, 
                     info.pci_dev->addr.devid);
 
+        qDebug("%d. %s", baseId, if_name);
+        qDebug("dpdk %d: %u "
+                "min_rx_buf = %u, max_rx_pktlen = %u, "
+                "maxq rx/tx = %u/%u", 
+                i, info.if_index,
+                info.min_rx_bufsize, info.max_rx_pktlen,
+                info.max_rx_queues, info.max_tx_queues);
         port = new DpdkPort(baseId++, if_name);
         if (!port->isUsable())
         {
