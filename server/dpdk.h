@@ -26,5 +26,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 int initDpdk(char* progname);
 QList<AbstractPort*> createDpdkPorts(int baseId);
+int dpdkStopPolling(void);
 
 #endif

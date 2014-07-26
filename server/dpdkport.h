@@ -24,11 +24,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 #include <QList>
 #include <QThread>
+#include <rte_ethdev.h>
 
 class DpdkPort: public AbstractPort
 {
 public:
-    DpdkPort(int id, const char *device);
+    DpdkPort(int id, const char *device, struct rte_mempool *mbufPool);
     virtual ~DpdkPort();
 
     virtual void init();
@@ -54,7 +55,14 @@ public:
     virtual bool isCaptureOn();
     virtual QIODevice* captureData();
 
-protected:
+    // DpdkPort-specific
+    void setTransmitLcoreId(unsigned lcoreId);
+    void initRxQueueConfig(const struct rte_pci_id *pciId);
+    void initTxQueueConfig(const struct rte_pci_id *pciId);
+
+    static int topSpeedTransmit(void *arg);
+
+private:
     class StatsMonitor: public QThread
     {
     public:
@@ -67,6 +75,21 @@ protected:
         int portCount_;
         bool stop_;
     };
+
+    typedef struct TxInfo_ {
+        int portId;
+        bool stopTx;
+        struct rte_mempool *pool;
+    } TxInfo;
+
+
+    int dpdkPortId_;
+    struct rte_mempool *mbufPool_;
+    struct rte_eth_rxconf rxConf_;
+    struct rte_eth_txconf txConf_;
+
+    int transmitLcoreId_;
+    TxInfo txInfo_;
 
     static int baseId_;
     static QList<DpdkPort*> allPorts_;

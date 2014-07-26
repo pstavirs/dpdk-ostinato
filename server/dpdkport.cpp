@@ -21,30 +21,79 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 #include <rte_ethdev.h>
 
-static struct rte_eth_conf eth_conf;
+static struct rte_eth_conf eth_conf; // FIXME: move to DpdkPort?
 const quint64 kMaxValue64 = ULLONG_MAX;
 
 int DpdkPort::baseId_ = -1;
 QList<DpdkPort*> DpdkPort::allPorts_;
 DpdkPort::StatsMonitor *DpdkPort::monitor_;
 
-DpdkPort::DpdkPort(int id, const char *device)
-    : AbstractPort(id, device)
+DpdkPort::DpdkPort(int id, const char *device, struct rte_mempool *mbufPool)
+    : AbstractPort(id, device), mbufPool_(mbufPool)
 {
     int ret;
+    struct rte_eth_dev_info devInfo;
 
     Q_ASSERT(baseId_ >= 0);
 
-#if 0
-    ret = rte_eth_dev_configure(id - baseId_, 1, 1, &eth_conf);
-    if (ret < 0)
+    // FIXME: this derivation of dpdkPortId_ won't work if one of the previous
+    // ports wasn't created for some reason
+    dpdkPortId_ = id - baseId_;
+
+    transmitLcoreId_ = -1;
+
+    rte_eth_dev_info_get(dpdkPortId_, &devInfo);
+
+    // FIXME: pass by reference?
+    initRxQueueConfig(&devInfo.pci_dev->id);
+    initTxQueueConfig(&devInfo.pci_dev->id);
+
+    ret = rte_eth_dev_configure(dpdkPortId_, 
+                                1, // # of rx queues
+                                1, // # of tx queues
+                                &eth_conf);
+    if (ret < 0) {
         qWarning("Unable to configure dpdk port %d. err = %d", id, ret);
-#endif
+        goto _error_exit;
+    }
+
+    ret = rte_eth_tx_queue_setup(dpdkPortId_,
+                                 0,  // queue #
+                                 32, // # of descriptors in ring
+                                 rte_eth_dev_socket_id(dpdkPortId_),
+                                 &txConf_);
+    if (ret < 0) {
+        qWarning("Unable to configure TxQ for port %d. err = %d", id, ret);
+        goto _error_exit;
+    }
+
+    ret = rte_eth_rx_queue_setup(dpdkPortId_, 
+                                 0,  // queue #
+                                 32, // # of descriptors in ring
+                                 rte_eth_dev_socket_id(dpdkPortId_),
+                                 &rxConf_,
+                                 mbufPool_);
+    if (ret < 0) {
+        qWarning("Unable to configure RxQ for port %d. err = %d", id, ret);
+        goto _error_exit;
+    }
+
+    ret = rte_eth_dev_start(dpdkPortId_);
+    if (ret < 0) {
+        qWarning("Unable to start port %d. err = %d", id, ret);
+        goto _error_exit;
+    }
+
+    rte_eth_promiscuous_enable(dpdkPortId_);
 
     if (!monitor_)
         monitor_ = new StatsMonitor();
 
     allPorts_.append(this);
+    return;
+
+_error_exit:
+    isUsable_ = false;
 }
 
 DpdkPort::~DpdkPort()
@@ -71,6 +120,48 @@ int DpdkPort::setBaseId(int baseId)
     return 0;
 }
 
+void DpdkPort::setTransmitLcoreId(unsigned lcoreId)
+{
+    transmitLcoreId_ = int(lcoreId);
+}
+
+void DpdkPort::initRxQueueConfig(const struct rte_pci_id *pciId)
+{
+    memset(&rxConf_, 0, sizeof(rxConf_));
+
+    switch (pciId->device_id) {
+#if 0
+    case FIXME:
+        rxConf_.rx_thresh.pthresh = 8;
+        rxConf_.rx_thresh.hthresh = 8;
+        rxConf_.rx_thresh.wthresh = 4;
+        break;
+#endif
+    default:
+        break;
+    }
+
+}
+
+void DpdkPort::initTxQueueConfig(const struct rte_pci_id *pciId)
+{
+    memset(&txConf_, 0, sizeof(rxConf_));
+
+    switch (pciId->device_id) {
+#if 0
+    case FIXME:
+        txConf_.tx_thresh.pthresh = 36;
+        txConf_.tx_thresh.hthresh = 0;
+        txConf_.tx_thresh.wthresh = 0;
+        txConf_.tx_free_thresh = 0;
+        txConf_.tx_rs_thresh = 0;
+        txConf_.txq_flags = ETH_TXQ_FLAGS_NOMULTSEGS | ETH_TXQ_FLAGS_NOOFFLOADS;
+        break;
+#endif
+    default:
+        break;
+    }
+}
 
 bool DpdkPort::hasExclusiveControl()
 {
@@ -105,15 +196,31 @@ void DpdkPort::setPacketListLoopMode(bool loop,
 
 void DpdkPort::startTransmit()
 {
+    int ret;
+
+    if (transmitLcoreId_ < 0) {
+        qWarning("Port %d.%s doesn't have a lcore to transmit", id(), name());
+        return;
+    }
+
+    txInfo_.portId = dpdkPortId_;
+    txInfo_.stopTx = false;
+    txInfo_.pool = mbufPool_;
+    ret = rte_eal_remote_launch(DpdkPort::topSpeedTransmit, &txInfo_, 
+                transmitLcoreId_);
+    if (ret < 0)
+        rte_exit(EXIT_FAILURE, "Failed to launch transmit\n");
 }
 
 void DpdkPort::stopTransmit()
 {
+    txInfo_.stopTx = true;
+    rte_eal_wait_lcore(transmitLcoreId_);
 }
 
 bool DpdkPort::isTransmitOn()
 {
-    return false;
+    return !txInfo_.stopTx;
 }
 
 
@@ -164,6 +271,9 @@ void DpdkPort::StatsMonitor::run()
         portStats.insert(i, &(allPorts_.at(i)->stats_));
         linkState.insert(i, &(allPorts_.at(i)->linkState_));
     }
+
+    // FIXME: portStats/linkState QLists may have holes in them if some
+    // port create/init failed
 
     //
     // We are all set - Let's start polling for stats!
@@ -231,4 +341,18 @@ void DpdkPort::StatsMonitor::run()
     linkState.clear();
 }
 
+int DpdkPort::topSpeedTransmit(void *arg)
+{
+    int n;
+    TxInfo *txInfo = (TxInfo*)arg;
 
+    while (!txInfo->stopTx) {
+        struct rte_mbuf *mbuf = rte_pktmbuf_alloc(txInfo->pool);
+        if (mbuf) {
+            rte_pktmbuf_append(mbuf, 64);
+            rte_eth_tx_burst(txInfo->portId, 0, &mbuf, 1);
+        }
+    }
+
+    return 0;
+}

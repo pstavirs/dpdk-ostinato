@@ -45,6 +45,7 @@ LIBS += -lrte_pmd_e1000 \
 # SDK libs to link
 LIBS += -lrte_malloc \
         -lethdev \
-        -lrte_eal \
         -lrte_mempool \
-        -lrte_ring
+        -lrte_mbuf \
+        -lrte_ring \
+        -lrte_eal

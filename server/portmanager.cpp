@@ -87,6 +87,9 @@ PortManager::PortManager()
 
 PortManager::~PortManager()
 {
+    // FIXME: should be something more generic and top-level
+    dpdkStopPolling();
+
     while (!portList_.isEmpty())
         delete portList_.takeFirst();
 }
