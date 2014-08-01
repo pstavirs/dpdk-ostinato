@@ -79,6 +79,19 @@ bool AbstractPort::modify(const OstProto::Port &port)
     return ret;
 }    
 
+int AbstractPort::activeStreamCount()
+{
+    int count = 0;
+
+    // TODO: cache this value or keep track of this during add/delete/modify
+    for (int i = 0; i < streamCount(); i++) {
+        if (streamList_[i]->isEnabled())
+            count++;
+    }
+
+    return count;
+}
+
 StreamBase* AbstractPort::streamAtIndex(int index)
 {
     Q_ASSERT(index < streamList_.size());
@@ -158,15 +171,60 @@ void AbstractPort::updatePacketList()
 
 void AbstractPort::updatePacketListSequential()
 {
-    long    sec = 0; 
-    long    nsec = 0;
+    quint64    sec = 0; 
+    quint64    nsec = 0;
+    quint64 totalPkts = 0;
 
     qDebug("In %s", __FUNCTION__);
 
     // First sort the streams by ordinalValue
     qSort(streamList_.begin(), streamList_.end(), StreamBase::StreamLessThan);
 
+    // Calculate total number of packets in packetList
+    for (int i = 0; i < streamList_.size(); i++)
+    {
+        if (streamList_[i]->isEnabled())
+        {
+            ulong frameVariableCount = streamList_[i]->frameVariableCount();
+            ulong burstSize;
+            ulong n, x, y;
+
+            // We derive x, y such that
+            // n * x + y = total number of packets to be sent
+
+            switch (streamList_[i]->sendUnit())
+            {
+            case OstProto::StreamControl::e_su_bursts:
+                burstSize = streamList_[i]->burstSize();
+                x = AbstractProtocol::lcm(frameVariableCount, burstSize);
+                n = ulong(burstSize * streamList_[i]->burstRate() 
+                            * streamList_[i]->numBursts()) / x;
+                y = ulong(burstSize * streamList_[i]->burstRate() 
+                            * streamList_[i]->numBursts()) % x;
+                break;
+            case OstProto::StreamControl::e_su_packets:
+                x = frameVariableCount;
+                n = 2;
+                while (x < minPacketSetSize_) 
+                    x = frameVariableCount*n++;
+                n = streamList_[i]->numPackets() / x;
+                y = streamList_[i]->numPackets() % x;
+                break;
+            default:
+                qWarning("Unhandled stream control unit %d",
+                    streamList_[i]->sendUnit());
+                continue;
+            }
+
+            qDebug("[%d] n = %lu, x = %lu, y = %lu, burstSz = %lu fvc = %lu\n",
+                    i, n, x, y, burstSize, frameVariableCount);
+
+            totalPkts += (x+y);
+        }
+    }
+
     clearPacketList();
+    setPacketListSize(totalPkts);
 
     for (int i = 0; i < streamList_.size(); i++)
     {
@@ -182,11 +240,12 @@ void AbstractPort::updatePacketListSequential()
             quint64 ipg1 = 0, ipg2 = 0;
             quint64 npx1 = 0, npx2 = 0;
             quint64 npy1 = 0, npy2 = 0;
-            quint64 loopDelay;
+            quint64 loopDelay, loopDelaySec;
             ulong frameVariableCount = streamList_[i]->frameVariableCount();
 
             // We derive n, x, y such that
             // n * x + y = total number of packets to be sent
+            // TODO: Reuse the derivation above
 
             switch (streamList_[i]->sendUnit())
             {
@@ -233,6 +292,13 @@ void AbstractPort::updatePacketListSequential()
                 continue;
             }
 
+            loopDelaySec = 0;
+            while (loopDelay >= long(1e9))
+            {
+                loopDelaySec++;
+                loopDelay -= long(1e9);
+            }
+
             qDebug("\nframeVariableCount = %lu", frameVariableCount);
             qDebug("n = %lu, x = %lu, y = %lu, burstSize = %lu",
                     n, x, y, burstSize);
@@ -252,7 +318,7 @@ void AbstractPort::updatePacketListSequential()
             qDebug("npy2 = %" PRIu64 "\n", npy2);
 
             if (n > 1)
-                loopNextPacketSet(x, n, 0, loopDelay);
+                loopNextPacketSet(x, n, loopDelaySec, loopDelay);
             else if (n == 0)
                 x = 0;
 
@@ -267,10 +333,10 @@ void AbstractPort::updatePacketListSequential()
                 if (len <= 0)
                     continue;
 
-                qDebug("q(%d, %d) sec = %lu nsec = %lu",
+                qDebug("q(%d, %d) sec = %" PRIu64 " nsec = %" PRIu64,
                         i, j, sec, nsec);
 
-                appendToPacketList(sec, nsec, pktBuf_, len); 
+                appendToPacketList(long(sec), long(nsec), pktBuf_, len); 
 
                 if ((j > 0) && (((j+1) % burstSize) == 0))
                 {
@@ -357,6 +423,8 @@ void AbstractPort::updatePacketListInterleaved()
     qSort(streamList_.begin(), streamList_.end(), StreamBase::StreamLessThan);
 
     clearPacketList();
+
+    // TODO: setPacketListSize();
 
     for (int i = 0; i < streamList_.size(); i++)
     {

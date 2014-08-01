@@ -67,6 +67,7 @@ public:
     virtual bool setExclusiveControl(bool exclusive) = 0;
 
     int streamCount() { return streamList_.size(); }
+    int activeStreamCount();
     StreamBase* streamAtIndex(int index);
     StreamBase* stream(int streamId);
     bool addStream(StreamBase *stream);
@@ -75,7 +76,9 @@ public:
     bool isDirty() { return isSendQueueDirty_; }
     void setDirty() { isSendQueueDirty_ = true; }
 
+    // TODO: convert all timestamp/delay to quint64 from long?
     virtual void clearPacketList() = 0;
+    virtual void setPacketListSize(quint64 /*size*/){} //FIXME: mk pure virtual
     virtual void loopNextPacketSet(qint64 size, qint64 repeats,
             long repeatDelaySec, long repeatDelayNsec) = 0;
     virtual bool appendToPacketList(long sec, long nsec, const uchar *packet, 
