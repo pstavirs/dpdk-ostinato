@@ -26,6 +26,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 #include <QThread>
 #include <rte_ethdev.h>
 
+#define DBG_MBUF_POOL
+
 class DpdkPort: public AbstractPort
 {
 public:
@@ -80,7 +82,6 @@ private:
 
     typedef struct DpdkPacket {
         struct rte_mbuf *mbuf;
-        struct rte_mbuf *mbufClone; // clone of mbuf to prevent free by Tx
         long tsSec;
         long tsNsec;
     } DpdkPacket;
@@ -157,7 +158,10 @@ private:
     static int baseId_;
     static QList<DpdkPort*> allPorts_;
     static StatsMonitor *monitor_; // rx/tx stats for ALL ports
-    static struct rte_mempool *cloneMbufPool_; // only used for clone mbufs
+
+#ifdef DBG_MBUF_POOL
+    static struct rte_mempool *mbufPool2_;
+#endif
 };
 
 #endif
