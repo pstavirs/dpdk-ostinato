@@ -29,7 +29,9 @@ const quint64 kMaxValue64 = ULLONG_MAX;
 int DpdkPort::baseId_ = -1;
 QList<DpdkPort*> DpdkPort::allPorts_;
 DpdkPort::StatsMonitor *DpdkPort::monitor_;
-struct rte_mempool *DpdkPort::cloneMbufPool_ = NULL;
+#ifdef DBG_MBUF_POOL
+struct rte_mempool *DpdkPort::mbufPool2_ = NULL;
+#endif
 
 DpdkPort::DpdkPort(int id, const char *device, struct rte_mempool *mbufPool)
     : AbstractPort(id, device), mbufPool_(mbufPool)
@@ -39,21 +41,9 @@ DpdkPort::DpdkPort(int id, const char *device, struct rte_mempool *mbufPool)
 
     Q_ASSERT(baseId_ >= 0);
 
-    if (!cloneMbufPool_) {
-        cloneMbufPool_ = rte_mempool_create(
-                "DpktPktCloneMbuf",
-                16*1024, // # of mbufs
-                sizeof(struct rte_mbuf), // sz of mbuf
-                32,   // per-lcore cache sz
-                0,
-                NULL, // pool ctor
-                NULL, // pool ctor arg
-                rte_pktmbuf_init, // mbuf ctor
-                NULL, // mbuf ctor arg
-                SOCKET_ID_ANY,
-                0     // flags
-                );
-    }
+#ifdef DBG_MBUF_POOL
+    mbufPool2_ = mbufPool;
+#endif
 
     // FIXME: this derivation of dpdkPortId_ won't work if one of the previous
     // ports wasn't created for some reason
@@ -195,8 +185,15 @@ bool DpdkPort::setExclusiveControl(bool exclusive)
 
 void DpdkPort::clearPacketList()
 {
-    for (uint i = 0; i < packetList_.size; i++) 
-        rte_pktmbuf_free(packetList_.packets[i].mbufClone);
+    for (uint i = 0; i < packetList_.size; i++) {
+        struct rte_mbuf *mbuf = packetList_.packets[i].mbuf;
+
+        // we bumped up the refcnt just before tx; bump it down
+        // before we free
+        rte_mbuf_refcnt_update(mbuf, -1);
+        qDebug("refcnt = %u", rte_mbuf_refcnt_read(mbuf));
+        rte_pktmbuf_free(mbuf);
+    }
     rte_free(packetList_.packets);
     rte_free(packetList_.packetSet);
     packetList_.reset();
@@ -207,6 +204,10 @@ void DpdkPort::setPacketListSize(quint64 size)
     Q_ASSERT(packetList_.packets == NULL);
     packetList_.size = 0;
     packetList_.maxSize = size;
+
+    if (size == 0)
+        return;
+
     packetList_.packets = (DpdkPacket*) rte_calloc("pktList", size, 
                                                     sizeof(DpdkPacket), 64);
     if (!packetList_.packets)
@@ -233,7 +234,7 @@ void DpdkPort::loopNextPacketSet(qint64 size, qint64 repeats,
     set->repeatDelayUsec = quint64(repeatDelaySec)*1e6 
                             + quint64(repeatDelayNsec)/1e3;
 
-    qDebug("%s: [%llu] (%llu - %llu)x%llu delay = %llu", __FUNCTION__,
+    qDebug("%s: [%llu] (%llu - %llu)x%llu delay = %llu usec", __FUNCTION__,
             packetList_.setSize, set->startOfs, set->endOfs, 
             set->loopCount, set->repeatDelayUsec);
 
@@ -267,19 +268,18 @@ bool DpdkPort::appendToPacketList(long sec, long nsec, const uchar *packet,
 
     pktData = rte_pktmbuf_append(mbuf, length);
     if (!pktData) {
+        qDebug("not enough tailroom in mbuf");
         rte_pktmbuf_free(mbuf);
         return false;
     }
 
     rte_memcpy(pktData, packet, length);
-    mbuf2 = rte_pktmbuf_clone(mbuf, cloneMbufPool_);
     packetList_.packets[packetList_.size].mbuf = mbuf;
-    packetList_.packets[packetList_.size].mbufClone = mbuf2;
     packetList_.packets[packetList_.size].tsSec = sec;
     packetList_.packets[packetList_.size].tsNsec = nsec;
     packetList_.size++;
 
-    rte_pktmbuf_dump(mbuf, 188);
+    //rte_pktmbuf_dump(mbuf, 188);
 
     if (packetList_.loopDelaySec || packetList_.loopDelayNsec)
         packetList_.topSpeedTransmit = false;
@@ -449,9 +449,13 @@ void DpdkPort::StatsMonitor::run()
             rte_eth_link_get_nowait(i, &rteLink);
             *state = rteLink.link_status ?
                 OstProto::LinkStateUp : OstProto::LinkStateDown;
-
-            QThread::sleep(kRefreshFreq_);
         }
+
+#ifdef DBG_MBUF_POOL
+        portStats[0]->rxFifoErrors = rte_mempool_count(mbufPool2_);
+#endif
+
+        QThread::sleep(kRefreshFreq_);
     }
 
     portStats.clear();
@@ -487,6 +491,10 @@ int DpdkPort::syncTransmit(void *arg)
         // TODO: define and use rte_delay_nsec()
         if (usec)
             rte_delay_us(usec);
+
+        // increment refcnt so that mbuf is not free'd after tx
+        rte_mbuf_refcnt_update(mbuf, 1);
+        //qDebug("refcnt = %u", rte_mbuf_refcnt_read(mbuf));
         rte_eth_tx_burst(txInfo->portId, 0, &mbuf, 1);
 
         if (i == packetSet->endOfs) {
