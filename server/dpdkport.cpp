@@ -221,6 +221,10 @@ void DpdkPort::setPacketListSize(quint64 size)
     if (!packetList_.packetSet)
         qWarning("failed to alloc packetSet");
 
+    packetList_.packetSet[0].startOfs = 0;
+    packetList_.packetSet[0].endOfs = size - 1;
+    packetList_.packetSet[0].loopCount = 1;
+    packetList_.packetSet[0].repeatDelayUsec = 0;
     // TODO: return sucess/fail result from function
 }
 
