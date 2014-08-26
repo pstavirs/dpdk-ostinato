@@ -187,10 +187,6 @@ void DpdkPort::clearPacketList()
 {
     for (uint i = 0; i < packetList_.size; i++) {
         struct rte_mbuf *mbuf = packetList_.packets[i].mbuf;
-
-        // we bumped up the refcnt just before tx; bump it down
-        // before we free
-        rte_mbuf_refcnt_update(mbuf, -1);
         qDebug("refcnt = %u", rte_mbuf_refcnt_read(mbuf));
         rte_pktmbuf_free(mbuf);
     }
