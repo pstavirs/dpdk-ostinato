@@ -1,6 +1,6 @@
 #DPDK accelerated Ostinato
 
-[Solo Prize Winner - 6WIND Speed Matters: The Challenge Contest](http://www.6wind.com/blog/congratulations-to-winners-of-6winds-inaugural-speed-matters-the-challenge-dpdk-contest-2/)
+[Solo Prize Winner - 6WIND Speed Matters: The Challenge Contest](http://www.prweb.com/releases/2014/08/prweb12120068.htm)
 
 Slide-deck: http://www.slideshare.net/pstavirs/dpdk-accelerated-ostinato
 
